@@ -28,7 +28,7 @@ if orgDQN:
 if multistep:
     env.reset()
     dqn = DQN(env, multistep=True)
-    multistep_record = dqn.learn(1500)
+    multistep_record = dqn.learn(500)
     del dqn
 
 print("Reinforcement Learning Finish")

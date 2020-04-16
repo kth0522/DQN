@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import random
 import gym
+import copy
 import os
 from gym import wrappers
 from statistics import mean
@@ -63,21 +64,20 @@ class Model:
             return 0
 
         # sample experience
-        ids = np.random.randint(low=0, high=len(self.experience['s']), size=self.batch_size)
-        states = np.asarray([self.experience['s'][i] for i in ids])
-        actions = np.asarray([self.experience['a'][i] for i in ids])
-        if self.multistep and len(self.experience['s']) > 50:
+
+        if self.multistep:
             multi_ids = np.random.randint(low=0, high=max(len(self.experience['s'])-self.n_step+1, 0), size=self.batch_size)
+            states = np.asarray([self.experience['s'][i] for i in multi_ids])
+            actions = np.asarray([self.experience['a'][i] for i in multi_ids])
 
-
-            end_step_states = np.asarray([self.experience['s'][i] for i in multi_ids])
+            end_step_states = np.asarray([self.experience['s2'][i+self.n_step-1] for i in multi_ids])
             end_step_value = np.max(TargetNet.predict(end_step_states), axis=1)
             rewards = np.asarray([self.experience['r'][i] for i in multi_ids])
-            dones = np.asarray([self.experience['done'][i] for i in multi_ids])
+            dones = np.asarray([self.experience['done'][i+self.n_step-1] for i in multi_ids])
 
             gamma = self.gamma
             for i in range(1, self.n_step):
-                step_reward = np.asarray([self.experience['r'][j+i] for j in multi_ids]) * gamma
+                step_reward = copy.deepcopy(np.asarray([self.experience['r'][j+i] for j in multi_ids])) * gamma
                 rewards += step_reward
                 gamma *= self.gamma
 
@@ -85,6 +85,9 @@ class Model:
             actual_values = np.where(dones, rewards, rewards+gamma*end_step_value)
 
         else:
+            ids = np.random.randint(low=0, high=len(self.experience['s']), size=self.batch_size)
+            states = np.asarray([self.experience['s'][i] for i in ids])
+            actions = np.asarray([self.experience['a'][i] for i in ids])
 
             rewards = np.asarray([self.experience['r'][i] for i in ids])
             states_next = np.asarray([self.experience['s2'][i] for i in ids])
@@ -122,7 +125,7 @@ class DQN:
         self.state_size = self.env.observation_space.shape[0]
         self.action_size = self.env.action_space.n
         self.multistep = multistep  # Multistep(n-step) 구현 시 True로 설정, 미구현 시 False
-        self.n_steps = 1           # Multistep(n-step) 구현 시 n 값, 수정 가능
+        self.n_steps = 3           # Multistep(n-step) 구현 시 n 값, 수정 가능
 
     def _build_network(self):
         # Target 네트워크와 Local 네트워크를 설정
@@ -201,7 +204,6 @@ class DQN:
 
             avg_step_count_list.append(avg_step_count)
 
-            self.make_video()
 
             if avg_step_count >= 475:
                 break
