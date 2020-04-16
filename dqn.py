@@ -1,16 +1,13 @@
-import sys
 import numpy as np
 import tensorflow as tf
-import random
-import gym
-import copy
-import os
-from gym import wrappers
 from statistics import mean
 from collections import deque
 
 
 class Network(tf.keras.Model):
+    '''
+    Base network
+    '''
     def __init__(self, num_states, hidden_units, num_actions):
         super(Network, self).__init__()
         self.input_layer = tf.keras.layers.InputLayer(input_shape=(num_states,))
@@ -31,80 +28,100 @@ class Network(tf.keras.Model):
         return output
 
 class Model:
+    '''
+    Model for the target network and local network
+    '''
     def __init__(self, env, multistep, n_step):
+        # Environment info
         self.env = env
-        self.multistep = multistep
-        self.n_step = n_step
         self.state_size = self.env.observation_space.shape[0]
         self.action_size = self.env.action_space.n
+
+        # Parameter for multi step
+        self.multistep = multistep
+        self.n_step = n_step
+
+        # Hyperparameter
         self.batch_size = 32
         self.learning_rate = 1e-4
-        self.optimizer = tf.optimizers.Adam(self.learning_rate)
         self.gamma = 0.99
+
+        # Network
+        self.optimizer = tf.optimizers.Adam(self.learning_rate)
         self.hidden_units = [200, 200]
         self.network = Network(self.state_size, self.hidden_units, self.action_size)
+
+        # Experience replay buffer
         self.experience = {'s': [], 'a': [], 'r': [], 's2': [], 'done': []}
         self.max_experiences = 10000
         self.min_experiences = 100
 
+    # Predict the value with state using network
     def predict(self, state):
         return self.network(np.atleast_2d(state.astype('float32')))
 
-
+    # Get action with state by epsilon-greedy algorithm
     def get_action(self, states, epsilon):
         if np.random.random() < epsilon:
             return np.random.choice(self.action_size)
         else:
             return np.argmax(self.predict(np.atleast_2d(states))[0])
 
+    # Take mini batch and update the policy
     def train_minibatch(self, TargetNet):
-        # mini batch를 받아 policy를 update
-
+        # If there is not enough experiences in the experience replay buffer, just return 0
         if len(self.experience['s']) < self.min_experiences:
             return 0
-
-        # sample experience
-
+        # Multistep DQN
         if self.multistep:
-            multi_ids = np.random.randint(low=0, high=max(len(self.experience['s'])-self.n_step+1, 0), size=self.batch_size)
+            # Sampling the mini batch index (maximum ids is smaller than full length, for preventing out of index error)
+            multi_ids = np.random.randint(low=0, high=max(len(self.experience['s'])-self.n_step+1, 0),\
+                                          size=self.batch_size)
+            # Lists of each sample's state, action, and reward
             states = np.asarray([self.experience['s'][i] for i in multi_ids])
             actions = np.asarray([self.experience['a'][i] for i in multi_ids])
-
+            rewards = np.asarray([self.experience['r'][i] for i in multi_ids])
+            # Information for n-th forward state from above state
             end_step_states = np.asarray([self.experience['s2'][i+self.n_step-1] for i in multi_ids])
             end_step_value = np.max(TargetNet.predict(end_step_states), axis=1)
-            rewards = np.asarray([self.experience['r'][i] for i in multi_ids])
             dones = np.asarray([self.experience['done'][i+self.n_step-1] for i in multi_ids])
-
+            # Temp gamma for iteration
             gamma = self.gamma
+            # Calculate multi step rewards
             for i in range(1, self.n_step):
-                step_reward = copy.deepcopy(np.asarray([self.experience['r'][j+i] for j in multi_ids])) * gamma
+                step_reward = np.asarray([self.experience['r'][j+i] for j in multi_ids]) * gamma
                 rewards += step_reward
                 gamma *= self.gamma
-
-
-            actual_values = np.where(dones, rewards, rewards+gamma*end_step_value)
-
+            # Calculate q-target
+            q_target = np.where(dones, rewards, rewards + gamma * end_step_value)
+        # Original DQN (equivalent to n=1 step DQN)
         else:
+            # Sampling the mini batch index
             ids = np.random.randint(low=0, high=len(self.experience['s']), size=self.batch_size)
+            # Lists of each sample's state, action, reward, and done
             states = np.asarray([self.experience['s'][i] for i in ids])
             actions = np.asarray([self.experience['a'][i] for i in ids])
-
             rewards = np.asarray([self.experience['r'][i] for i in ids])
-            states_next = np.asarray([self.experience['s2'][i] for i in ids])
             dones = np.asarray([self.experience['done'][i] for i in ids])
+            # Information for next states
+            states_next = np.asarray([self.experience['s2'][i] for i in ids])
             value_next = np.max(TargetNet.predict(states_next), axis=1)
-            actual_values = np.where(dones, rewards, rewards+self.gamma*value_next)
-
+            # Calculate q-target
+            q_target = np.where(dones, rewards, rewards + self.gamma * value_next)
+        # Q-prediction get from wS_t
         with tf.GradientTape() as tape:
             selected_action_values = tf.math.reduce_sum(
                 self.predict(states) * tf.one_hot(actions, self.action_size), axis=1)
-            loss = tf.math.reduce_mean(tf.square(actual_values - selected_action_values))
+            # Calculate loss
+            loss = tf.math.reduce_mean(tf.square(q_target - selected_action_values))
+        # Updating gradients
         variables = self.network.trainable_variables
         gradients = tape.gradient(loss, variables)
         self.optimizer.apply_gradients((zip(gradients, variables)))
 
         return loss
 
+    # Add new experience to the experience replay buffer
     def add_experience(self, exp):
         if len(self.experience['s']) >= self.max_experiences:
             for key in self.experience.keys():
@@ -112,37 +129,50 @@ class Model:
         for key, value in exp.items():
             self.experience[key].append(value)
 
-    def copy_weights(self, TrainNet):
+    # Copy the network's weight to another network
+    def copy_weights(self, LocalNet):
         variables1 = self.network.trainable_variables
-        variables2 = TrainNet.network.trainable_variables
+        variables2 = LocalNet.network.trainable_variables
         for v1, v2 in zip(variables1, variables2):
             v1.assign(v2.numpy())
 
 
 class DQN:
+    '''
+    DQN consists of target network and local network
+    '''
     def __init__(self, env, multistep=False):
+        # Environment info
         self.env = env
         self.state_size = self.env.observation_space.shape[0]
         self.action_size = self.env.action_space.n
-        self.multistep = multistep  # Multistep(n-step) 구현 시 True로 설정, 미구현 시 False
-        self.n_steps = 3           # Multistep(n-step) 구현 시 n 값, 수정 가능
 
+        # Hyperparameter
+        self.epsilon = 0.1
+        self.min_epsilon = 0
+        self.epsilon_decay = 0.9999
+        self.copy_step = 3
+
+        # Parameter for multi step
+        self.multistep = multistep
+        self.n_steps = 3
+
+    # Build target network and local network
     def _build_network(self):
-        # Target 네트워크와 Local 네트워크를 설정
         self.TargetNet = Model(self.env, self.multistep, self.n_steps)
         self.LocalNet = Model(self.env, self.multistep, self.n_steps)
 
-
-    def play_game(self, epsilon, copy_step):
+    # Play the one episode
+    def play_game(self):
         rewards = 0
         step_count = 0
         done = False
         observations = self.env.reset()
-        experience_buffer = deque(maxlen=self.n_steps)
+
         losses = list()
 
         while not done:
-            action = self.LocalNet.get_action(observations, epsilon)
+            action = self.LocalNet.get_action(observations, self.epsilon)
             prev_observations = observations
             observations, reward, done, _ = self.env.step(action)
             rewards += reward
@@ -158,53 +188,36 @@ class DQN:
             else:
                 losses.append(loss.numpy())
             step_count += 1
-            if step_count % copy_step == 0:
+            if step_count % self.copy_step == 0:
                 self.TargetNet.copy_weights(self.LocalNet)
         return rewards, mean(losses), step_count
 
-    def make_video(self):
-        env = wrappers.Monitor(self.env, os.path.join(os.getcwd(), "videos"), force=True)
-        rewards = 0
-        steps = 0
-        done = False
-        observation = self.env.reset()
-        while not done:
-            self.env.render()
-            action = self.LocalNet.get_action(observation, 0)
-            observation, reward, done, _ = self.env.step(action)
-            steps += 1
-            rewards += reward
-        print("Testing steps: {} rewards {}: ".format(steps, rewards))
+    # Updating epsilon
+    def update_epsilon(self):
+        self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
-
-    # episode 최대 횟수는 구현하는 동안 더 적게, 더 많이 돌려보아도 무방합니다.
-    # 그러나 평가시에는 episode 최대 회수를 1500 으로 설정합니다.
+    # Training the DQN
     def learn(self, max_episode=1500):
-        avg_step_count_list = []     # 결과 그래프 그리기 위해 script.py 로 반환
+        self._build_network()
+
+        avg_step_count_list = []
         last_100_episode_step_count = deque(maxlen=100)
-
-        _ = self._build_network()
-
         total_rewards = np.empty(max_episode)
-        copy_step = 4
-        epsilon = 0.1
-        decay = 0.9999
-        min_epsilon = 0
 
         for episode in range(max_episode):
-            epsilon = max(min_epsilon, epsilon * decay)
-            total_reward, losses, step_count = self.play_game(epsilon, copy_step)
+            self.update_epsilon()
+
+            total_reward, losses, step_count = self.play_game()
             total_rewards[episode] = total_reward
-
             last_100_episode_step_count.append(step_count)
-
-            # 최근 100개의 에피소드 평균 step 횟수를 저장 (이 부분은 수정하지 마세요)
             avg_step_count = np.mean(last_100_episode_step_count)
+
+            # Print progress
             print("[Episode {:>5}]  episode step_count: {:>5} avg step_count: {}".format(episode, step_count, avg_step_count))
 
             avg_step_count_list.append(avg_step_count)
 
-
+            # If average step count exceed 475, stop early
             if avg_step_count >= 475:
                 break
 
