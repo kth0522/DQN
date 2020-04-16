@@ -34,12 +34,10 @@ if multistep:
 print("Reinforcement Learning Finish")
 print("Draw graph ... ")
 
-x = np.arange((1500))
-
 if orgDQN:
-    plt.plot(x, orgDQN_record, label='Orginal DQN')
+    plt.plot(np.arange((len(orgDQN_record))), orgDQN_record, label='Original DQN')
 if multistep:
-    plt.plot(x, multistep_record, label='Multistep DQN')
+    plt.plot(np.arange((len(multistep_record))), multistep_record, label='Multistep DQN')
 
 plt.legend()
 fig =plt.gcf()
