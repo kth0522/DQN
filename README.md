@@ -20,4 +20,10 @@ python script.py orgDQN multistep
 </code>
 </pre>
 ## Result
-<img src="./final result(org: 488 epi, 475.39 step| mult: 303 epi, 476.4 step" width="450px" height="300px" title="px(픽셀) 크기 설정" alt="result"></img><br/>
+If the average step count exceed 475, the training ends early. 
+<img src="./final result(org: 488 epi, 475.39 step| mult: 303 epi, 476.4 step .png" width="450px" height="300px"></img><br/>
+|model|end episode|final average step|
+|------|---|---|
+|Original DQN|488|475.39|
+|Multi-step DQN (n=3)|303|476.4|
+
