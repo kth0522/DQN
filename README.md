@@ -10,13 +10,13 @@ The experiment has done under the OpenAI gym cartpole-v1 environment.
 Training only original DQN.
 <pre>
 <code>
-python script.py orgDQN
+> python script.py orgDQN
 </code>
 </pre>
 Training original DQN and multi-step DQN in a sequence.
 <pre>
 <code>
-python script.py orgDQN multistep
+> python script.py orgDQN multistep
 </code>
 </pre>
 ## Result
