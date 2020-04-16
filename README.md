@@ -24,6 +24,7 @@ If the average step count exceed 475, the training ends early.
 <p align="center">
 <img src="./final result(org: 488 epi, 475.39 step| mult: 303 epi, 476.4 step .png" width="450px" height="300px"></img><br/>
 </p>
+
 |model|end episode|final average step|
 |------|---|---|
 |Original DQN|488|475.39|
